@@ -229,4 +229,96 @@ describe('GitAnalyzer - Property Tests', () => {
       { numRuns: 10 } // Reduced from 20
     );
   }, 10000); // 10 second timeout
+
+  /**
+   * **Validates: Requirements 4.5, 4.6**
+   * 
+   * Property 4: Repository Classification Correctness
+   * For any repository, it should be classified as active if and only if it has
+   * at least one commit in the specified time period, and classified as cold otherwise.
+   */
+  it('should correctly classify repositories as active or cold based on commits', async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.integer({ min: 0, max: 10 }), // Number of commits to create
+        fc.integer({ min: 1, max: 30 }), // Days to look back
+        async (commitCount, days) => {
+          // Clean and reinitialize test repository
+          try {
+            await rm(testRepoPath, { recursive: true, force: true });
+          } catch (error) {
+            // Ignore cleanup errors
+          }
+          testRepoPath = await mkdtemp(join(tmpdir(), 'vibe-analyzer-prop-test-'));
+          await execFileAsync('git', ['init'], { cwd: testRepoPath });
+          await execFileAsync('git', ['config', 'user.email', 'test@example.com'], { cwd: testRepoPath });
+          await execFileAsync('git', ['config', 'user.name', 'Test User'], { cwd: testRepoPath });
+
+          // Create commits
+          for (let i = 0; i < commitCount; i++) {
+            await writeFile(join(testRepoPath, `file${i}.txt`), `content ${i}`);
+            await execFileAsync('git', ['add', '.'], { cwd: testRepoPath });
+            await execFileAsync('git', ['commit', '-m', `Commit ${i}`], { cwd: testRepoPath });
+          }
+
+          // Analyze the repository
+          const metrics = await analyzer.analyzeRepo(testRepoPath, days);
+
+          // Property: Repository is active if and only if it has at least one commit in the period
+          if (commitCount > 0) {
+            // All commits were just created, so they should all be within the time period
+            expect(metrics.isActive).toBe(true);
+            expect(metrics.commitCountInPeriod).toBeGreaterThan(0);
+          } else {
+            // No commits means repository should be cold
+            expect(metrics.isActive).toBe(false);
+            expect(metrics.commitCountInPeriod).toBe(0);
+          }
+
+          // Verify the classification matches the commit count
+          expect(metrics.isActive).toBe(metrics.commitCountInPeriod > 0);
+        }
+      ),
+      { numRuns: 20 }
+    );
+  }, 10000); // 10 second timeout
+
+  /**
+   * **Validates: Requirements 4.8**
+   * 
+   * Property 5: Non-Negative Commit Counts
+   * For any repository analysis, the commit count should always be a non-negative integer.
+   */
+  it('should always return non-negative commit counts', async () => {
+    await fc.assert(
+      fc.asyncProperty(
+        fc.integer({ min: 0, max: 10 }), // Number of commits
+        fc.integer({ min: 1, max: 30 }), // Days to look back
+        async (commitCount, days) => {
+          // Clean and reinitialize test repository
+          await rm(testRepoPath, { recursive: true, force: true });
+          testRepoPath = await mkdtemp(join(tmpdir(), 'vibe-analyzer-prop-test-'));
+          await execFileAsync('git', ['init'], { cwd: testRepoPath });
+          await execFileAsync('git', ['config', 'user.email', 'test@example.com'], { cwd: testRepoPath });
+          await execFileAsync('git', ['config', 'user.name', 'Test User'], { cwd: testRepoPath });
+
+          // Create commits
+          for (let i = 0; i < commitCount; i++) {
+            await writeFile(join(testRepoPath, `file${i}.txt`), `content ${i}`);
+            await execFileAsync('git', ['add', '.'], { cwd: testRepoPath });
+            await execFileAsync('git', ['commit', '-m', `Commit ${i}`], { cwd: testRepoPath });
+          }
+
+          const metrics = await analyzer.analyzeRepo(testRepoPath, days);
+
+          // Property: Commit count must be non-negative
+          expect(metrics.commitCountInPeriod).toBeGreaterThanOrEqual(0);
+          
+          // Property: Commit count must be an integer
+          expect(Number.isInteger(metrics.commitCountInPeriod)).toBe(true);
+        }
+      ),
+      { numRuns: 20 }
+    );
+  }, 10000);
 });

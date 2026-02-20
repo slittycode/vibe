@@ -1,16 +1,14 @@
 #!/usr/bin/env node
 
 /**
- * vibe-cli - AI-powered git repository activity summary tool
- * Entry point for the CLI application
+ * Entry point for vibe-cli
+ * Invokes the main function with command-line arguments
  */
 
-async function main() {
-  console.log('vibe-cli is starting...');
-  // TODO: Implement CLI logic
-}
+import { main } from './main.js';
 
-main().catch((error) => {
-  console.error('Error:', error.message);
+// Invoke main function with process arguments
+main(process.argv).catch((error) => {
+  console.error('Fatal error:', error);
   process.exit(1);
 });
