@@ -8,7 +8,31 @@ import { parseCLIArgs } from './cli.js';
 import { RepositoryScanner } from './scanner.js';
 import { GitAnalyzer } from './analyzer.js';
 import { DataAggregator } from './aggregator.js';
-import { BedrockClient } from './bedrock.js';
+import { ProviderFactory, SummaryProvider } from './providers.js';
+import { FallbackProvider } from './fallback.js';
+
+/**
+ * Shows provider availability status
+ */
+async function showProviderStatus(): Promise<void> {
+  const fallbackProvider = new FallbackProvider({
+    providers: ['ollama', 'bedrock', 'template'],
+    skipUnavailable: true
+  });
+
+  const status = await fallbackProvider.getProviderInfo();
+
+  console.log('Provider Status:');
+  console.log('');
+  status.forEach(({ type, available, error }) => {
+    const icon = available ? '✅' : '❌';
+    const statusText = available ? 'Available' : `Not Available${error ? `: ${error}` : ''}`;
+    console.log(`${icon} ${type.padEnd(10)} - ${statusText}`);
+  });
+  console.log('');
+  console.log('Usage: vibe --provider <provider> --days <days>');
+  console.log('Providers: bedrock, template, ollama, auto');
+}
 
 /**
  * Main function that orchestrates the vibe-cli workflow
@@ -19,8 +43,15 @@ export async function main(args: string[]): Promise<void> {
     // Step 1: Parse CLI options
     const options = parseCLIArgs(args);
 
-    // Step 2: Load configuration (skip AWS validation in raw mode)
-    const config = loadConfig(!options.raw);
+    // Step 2: Handle status display
+    if (options.status) {
+      await showProviderStatus();
+      process.exit(0);
+    }
+
+    // Step 3: Load configuration (skip AWS validation for non-bedrock providers and raw mode)
+    const requireAwsConfig = options.provider === 'bedrock' && !options.raw;
+    const config = loadConfig(requireAwsConfig);
     const rootPath = options.root ?? config.rootPath;
 
     // Step 3: Scan for repositories
@@ -52,22 +83,25 @@ export async function main(args: string[]): Promise<void> {
       console.log(`cold_repos=${summary.coldRepos}`);
       console.log(`total_commits=${summary.totalCommits}`);
       console.log(`commit_distribution=${summary.commitDistribution}`);
-      
+
       if (summary.topLanguages.length > 0) {
         summary.topLanguages.forEach((lang, index) => {
           console.log(`top_language_${index + 1}=${lang.language}:${lang.percentage}%`);
         });
       }
-      
+
       if (summary.mostActiveRepos.length > 0) {
         summary.mostActiveRepos.forEach((repo, index) => {
           console.log(`most_active_repo_${index + 1}=${repo}`);
         });
       }
     } else {
-      // AI summary mode - call Bedrock
-      const bedrock = new BedrockClient(config.awsRegion, config.modelId);
-      const vibeText = await bedrock.generateVibeCheck(summary);
+      // AI summary mode - use configured provider
+      const provider = await ProviderFactory.create(options.provider!, {
+        region: config.awsRegion,
+        modelId: config.modelId
+      });
+      const vibeText = await provider.generateVibeCheck(summary);
       console.log(vibeText);
     }
 

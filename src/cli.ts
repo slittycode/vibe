@@ -15,6 +15,10 @@ export interface CLIOptions {
   root?: string;
   /** Show raw metrics without AI summary */
   raw?: boolean;
+  /** AI provider to use for summaries */
+  provider?: 'bedrock' | 'template' | 'ollama' | 'auto';
+  /** Show provider availability information */
+  status?: boolean;
 }
 
 /**
@@ -32,6 +36,8 @@ export function parseCLIArgs(args: string[]): CLIOptions {
     .option('-d, --days <number>', 'Number of days to analyze', '7')
     .option('-r, --root <path>', 'Root directory to scan for repositories')
     .option('--raw', 'Show raw metrics without AI summary')
+    .option('-p, --provider <provider>', 'AI provider for summaries (bedrock|template|ollama|auto)', 'bedrock')
+    .option('--status', 'Show provider availability status')
     .parse(args);
 
   const options = program.opts();
@@ -43,9 +49,18 @@ export function parseCLIArgs(args: string[]): CLIOptions {
     process.exit(1);
   }
 
+  // Validate provider
+  const validProviders = ['bedrock', 'template', 'ollama', 'auto'];
+  if (options.provider && !validProviders.includes(options.provider)) {
+    console.error(`Error: --provider must be one of: ${validProviders.join(', ')}`);
+    process.exit(1);
+  }
+
   return {
     days,
     root: options.root,
-    raw: options.raw || false
+    raw: options.raw || false,
+    provider: options.provider || 'bedrock',
+    status: options.status || false
   };
 }

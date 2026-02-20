@@ -2,7 +2,7 @@
 
 ## Overview
 
-This plan implements a CLI tool that scans git repositories, analyzes commit activity, and generates AI-powered summaries of coding patterns. The implementation follows a bottom-up approach, building core utilities first, then data collection components, aggregation logic, and finally the CLI orchestration layer.
+This plan implements a CLI tool that scans git repositories, analyzes commit activity, and generates AI-powered summaries of coding patterns using Claude via AWS Bedrock. The implementation follows a bottom-up approach, building core utilities first, then data collection components, aggregation logic, Bedrock integration, and finally the CLI orchestration layer with support for both AI summaries and raw metric output.
 
 ## Tasks
 
@@ -16,11 +16,13 @@ This plan implements a CLI tool that scans git repositories, analyzes commit act
 
 - [x] 2. Implement configuration management
   - [x] 2.1 Create Config interface and ConfigManager class
-    - Define Config interface with rootPath, claudeApiKey, defaultDays, maxDepth
-    - Implement loadConfig() to read from environment variables
+    - Define Config interface with rootPath, awsRegion, modelId, defaultDays, maxDepth
+    - Implement loadConfig(requireAwsConfig) to read from environment variables
     - Implement tilde expansion for paths
-    - Validate that ANTHROPIC_API_KEY is set, throw error if missing
-    - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5_
+    - Check AWS credentials via SDK credential chain when requireAwsConfig is true
+    - Default to us-east-1 region and cross-region inference profile model ID
+    - Skip AWS validation when --raw flag is used
+    - _Requirements: 2.1, 2.2, 2.3, 2.4, 2.5, 2.6, 2.7, 2.8, 2.9, 2.10_
   
   - [x] 2.2 Write property test for tilde expansion
     - **Property 14: Tilde Expansion**
@@ -140,26 +142,26 @@ This plan implements a CLI tool that scans git repositories, analyzes commit act
     - **Property 13: Time Range Calculation**
     - **Validates: Requirements 1.2**
 
-- [ ] 9. Implement Claude API client
-  - [~] 9.1 Create ClaudeClient class with generateVibeCheck method
-    - Initialize Anthropic SDK client with API key
-    - Implement buildPrompt helper to format WorkPatternSummary into prompt
-    - Call Claude API with claude-3-5-haiku-20241022 model
+- [x] 9. Implement Bedrock API client
+  - [x] 9.1 Create BedrockClient class with generateVibeCheck method
+    - Initialize AWS Bedrock Runtime client with region
+    - Implement buildPrompt helper to format WorkPatternSummary into prompt with natural language distribution descriptions
+    - Call Bedrock with Claude 3.5 Haiku via cross-region inference profile
     - Set max_tokens to 200 for concise responses
-    - Extract text from API response
-    - Handle API errors with descriptive messages
-    - Never log or expose API key in output
-    - _Requirements: 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7, 10.3, 11.1_
+    - Extract text from Bedrock API response
+    - Handle Bedrock API errors with descriptive messages
+    - Never log or expose AWS credentials in output
+    - _Requirements: 7.1, 7.2, 7.3, 7.4, 7.5, 7.6, 7.7, 7.8, 7.9, 10.3, 11.1, 11.7_
   
-  - [~] 9.2 Write property test for API key security
-    - **Property 15: API Key Security**
-    - **Validates: Requirements 7.6**
+  - [x] 9.2 Write property test for AWS credential security
+    - **Property 15: AWS Credential Security**
+    - **Validates: Requirements 7.6, 11.7**
   
-  - [~] 9.3 Write property test for HTTPS communication
-    - **Property 16: HTTPS API Communication**
-    - **Validates: Requirements 7.7**
+  - [x] 9.3 Write property test for secure communication
+    - **Property 16: Secure Bedrock Communication**
+    - **Validates: Requirements 7.7, 11.6**
   
-  - [~] 9.4 Write property test for API response validation
+  - [x] 9.4 Write property test for API response validation
     - **Property 21: API Response Validation**
     - **Validates: Requirements 11.6**
 
@@ -168,38 +170,40 @@ This plan implements a CLI tool that scans git repositories, analyzes commit act
     - Use commander library to parse CLI arguments
     - Define --days flag with default value of 7
     - Define --root flag for custom root path
+    - Define --raw flag for outputting metrics without AI summary
     - Implement parseCLIArgs to extract CLIOptions
     - Validate that days is positive integer
-    - _Requirements: 1.1, 1.2, 1.3, 1.4_
+    - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6_
   
   - [x] 10.2 Write unit tests for CLI argument parsing
     - Test default values
     - Test custom --days and --root flags
+    - Test --raw flag
     - Test invalid argument handling
-    - _Requirements: 1.1, 1.2, 1.3, 1.4_
+    - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6_
 
-- [ ] 11. Implement main orchestration logic
+- [x] 11. Implement main orchestration logic
   - [x] 11.1 Create main function to orchestrate workflow
-    - Load configuration using ConfigManager
+    - Load configuration using ConfigManager (skip AWS validation if --raw)
     - Parse CLI arguments
     - Scan repositories using RepositoryScanner
     - Analyze each repository using GitAnalyzer
     - Aggregate metrics using DataAggregator
-    - Generate summary using ClaudeClient
-    - Output summary to stdout
+    - If --raw flag: output metrics in key=value format
+    - If not --raw: generate summary using BedrockClient and output to stdout
     - Handle all error scenarios with appropriate messages
     - Exit with code 0 on success, code 1 on error
-    - _Requirements: 1.5, 8.1, 8.2, 8.3, 9.1, 9.2, 9.3, 9.4, 9.5, 9.6_
+    - _Requirements: 1.5, 1.6, 8.1, 8.2, 8.3, 8.4, 9.1, 9.2, 9.3, 9.4, 9.5, 9.6_
   
-  - [~] 11.2 Write property test for successful execution output
+  - [x] 11.2 Write property test for successful execution output
     - **Property 17: Successful Execution Output**
-    - **Validates: Requirements 1.5, 8.1**
+    - **Validates: Requirements 1.5, 1.6, 8.1**
   
-  - [~] 11.3 Write property test for error output routing
+  - [x] 11.3 Write property test for error output routing
     - **Property 18: Error Output Routing**
-    - **Validates: Requirements 8.3**
+    - **Validates: Requirements 8.3, 8.4**
 
-- [ ] 12. Create CLI entry point file
+- [x] 12. Create CLI entry point file
   - [x] 12.1 Create src/index.ts with shebang and main invocation
     - Add #!/usr/bin/env node shebang
     - Import and invoke main function
@@ -225,7 +229,7 @@ This plan implements a CLI tool that scans git repositories, analyzes commit act
     - Mock Claude API to avoid external dependencies
     - _Requirements: 1.5, 8.1_
 
-- [~] 15. Final checkpoint - Ensure all tests pass
+- [x] 15. Final checkpoint - Ensure all tests pass
   - Ensure all tests pass, ask the user if questions arise.
 
 ## Notes
@@ -236,3 +240,16 @@ This plan implements a CLI tool that scans git repositories, analyzes commit act
 - Property tests validate universal correctness properties from the design document
 - Unit tests validate specific examples and edge cases
 - The implementation uses TypeScript with ESM modules as specified in the design
+
+
+## AWS Bedrock Configuration
+
+This implementation uses AWS Bedrock instead of the Anthropic Claude API directly. Key differences:
+
+- **Authentication**: Uses AWS SDK credential chain (environment variables, profiles, IAM roles) instead of ANTHROPIC_API_KEY
+- **Model ID**: Uses cross-region inference profile `us.anthropic.claude-3-5-haiku-20241022-v1:0` for better availability
+- **Region**: Defaults to `us-east-1`, configurable via AWS_REGION environment variable
+- **Raw Mode**: The `--raw` flag allows running without AWS credentials, outputting metrics in pipe-friendly key=value format
+- **Dependencies**: Requires `@aws-sdk/client-bedrock-runtime` package
+
+See `AWS_BEDROCK_SETUP.md` for detailed configuration instructions, IAM permissions, and troubleshooting.

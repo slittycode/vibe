@@ -2,7 +2,7 @@
 
 ## Overview
 
-The `vibe` CLI tool provides developers with a casual, AI-generated summary of their recent coding activity across all git repositories. It scans a configurable directory tree for git repos, collects commit metrics (last commit date, recent commit count, detected languages), aggregates this data into a work pattern analysis, and uses Claude API to generate a friendly 3-4 sentence journal-style summary. The tool is designed as a globally installable npm package that runs as a single command with minimal configuration.
+The `vibe` CLI tool provides developers with a casual, AI-generated summary of their recent coding activity across all git repositories. It scans a configurable directory tree for git repos, collects commit metrics (last commit date, recent commit count, detected languages), aggregates this data into a work pattern analysis, and uses Claude via AWS Bedrock to generate a friendly 3-4 sentence journal-style summary. The tool is designed as a globally installable npm package that runs as a single command with minimal configuration.
 
 ## Architecture
 
@@ -13,7 +13,7 @@ graph TD
     C --> D[Git Analyzer]
     D --> E[Language Detector]
     E --> F[Data Aggregator]
-    F --> G[Claude API Client]
+    F --> G[Bedrock Client]
     G --> H[Output Formatter]
     H --> I[stdout]
 ```
@@ -29,7 +29,7 @@ sequenceDiagram
     participant Scanner
     participant GitAnalyzer
     participant Aggregator
-    participant Claude
+    participant Bedrock
     
     User->>CLI: vibe --days 7
     CLI->>Scanner: scanRepos(rootPath)
@@ -38,8 +38,8 @@ sequenceDiagram
     Scanner-->>CLI: RepoMetrics[]
     CLI->>Aggregator: aggregate(metrics)
     Aggregator-->>CLI: WorkPatternSummary
-    CLI->>Claude: generateVibeCheck(summary)
-    Claude-->>CLI: casual summary text
+    CLI->>Bedrock: generateVibeCheck(summary)
+    Bedrock-->>CLI: casual summary text
     CLI->>User: output to stdout
 ```
 
@@ -55,6 +55,7 @@ sequenceDiagram
 interface CLIOptions {
   days: number;
   root?: string;
+  raw?: boolean;
 }
 
 interface CLIRunner {
@@ -154,7 +155,7 @@ interface WorkPatternSummary {
   activeRepos: number;
   coldRepos: number;
   totalCommits: number;
-  commitDistribution: 'clustered' | 'spread' | 'sparse';
+  commitDistribution: 'focused' | 'clustered' | 'spread' | 'sparse';
   topLanguages: LanguageStats[];
   mostActiveRepos: string[];
   timeRange: { start: Date; end: Date };
@@ -168,28 +169,29 @@ interface WorkPatternSummary {
 - Identify top languages across all repos
 - Rank most active repositories
 
-### Component 6: Claude API Client
+### Component 6: Bedrock Client
 
-**Purpose**: Generate casual summary using Claude API
+**Purpose**: Generate casual summary using Claude via AWS Bedrock
 
 **Interface**:
 ```typescript
-interface ClaudeClient {
+interface BedrockClient {
   generateVibeCheck(summary: WorkPatternSummary): Promise<string>;
 }
 
-interface ClaudeConfig {
-  apiKey: string;
-  model: 'claude-3-5-haiku-20241022';
+interface BedrockConfig {
+  region: string;
+  modelId: string;
   maxTokens: number;
 }
 ```
 
 **Responsibilities**:
-- Format work pattern summary into prompt
-- Call Claude API with appropriate parameters
-- Handle API errors and rate limits
+- Format work pattern summary into prompt with natural language distribution descriptions
+- Call AWS Bedrock with appropriate parameters
+- Handle Bedrock API errors and model availability issues
 - Return generated text
+- Use AWS SDK credential chain for authentication
 
 
 ### Component 7: Configuration Manager
@@ -199,22 +201,25 @@ interface ClaudeConfig {
 **Interface**:
 ```typescript
 interface ConfigManager {
-  loadConfig(): Config;
+  loadConfig(requireAwsConfig?: boolean): Config;
 }
 
 interface Config {
   rootPath: string;
-  claudeApiKey: string;
+  awsRegion: string;
+  modelId: string;
   defaultDays: number;
   maxDepth: number;
 }
 ```
 
 **Responsibilities**:
-- Read environment variables (VIBE_ROOT, ANTHROPIC_API_KEY)
-- Provide sensible defaults
+- Check AWS credentials via AWS SDK credential chain
+- Read environment variables (VIBE_ROOT, AWS_REGION, BEDROCK_MODEL_ID)
+- Provide sensible defaults (us-east-1 region, cross-region inference profile)
 - Validate required configuration
 - Expand tilde (~) in paths
+- Skip AWS validation when --raw flag is used
 
 ## Data Models
 
@@ -246,7 +251,7 @@ interface WorkPatternSummary {
   activeRepos: number;
   coldRepos: number;
   totalCommits: number;
-  commitDistribution: 'clustered' | 'spread' | 'sparse';
+  commitDistribution: 'focused' | 'clustered' | 'spread' | 'sparse';
   topLanguages: LanguageStats[];
   mostActiveRepos: string[];
   timeRange: { start: Date; end: Date };
@@ -256,7 +261,11 @@ interface WorkPatternSummary {
 **Validation Rules**:
 - `totalRepos = activeRepos + coldRepos`
 - `totalCommits` sum of all repo commit counts
-- `commitDistribution` determined by variance in commit counts
+- `commitDistribution` determined by number of active repos and variance:
+  - `focused`: exactly one active repository
+  - `clustered`: multiple active repos with high variance (stdDev > mean * 0.5)
+  - `spread`: multiple active repos with low variance (stdDev ≤ mean * 0.5)
+  - `sparse`: no active repositories
 - `topLanguages` limited to top 5
 - `mostActiveRepos` limited to top 3
 
@@ -598,60 +607,85 @@ function determineDistribution(commitCounts: number[]): 'clustered' | 'spread' |
 ```
 
 
-### Claude API Integration Algorithm
+### Bedrock API Integration Algorithm
 
 ```typescript
-async function generateVibeCheck(summary: WorkPatternSummary, apiKey: string): Promise<string>
+async function generateVibeCheck(summary: WorkPatternSummary, region: string, modelId: string): Promise<string>
 ```
 
 **Preconditions:**
 - `summary` is valid WorkPatternSummary object
-- `apiKey` is non-empty string
+- `region` is valid AWS region string
+- `modelId` is valid Bedrock model ID (cross-region inference profile)
+- AWS credentials are configured
 - Network connectivity available
 
 **Postconditions:**
 - Returns 3-4 sentence casual summary
 - Text is journal-style, not report-style
-- Handles API errors gracefully
+- Handles Bedrock API errors gracefully
 
 **Algorithm:**
 ```typescript
-async function generateVibeCheck(summary: WorkPatternSummary, apiKey: string): Promise<string> {
+async function generateVibeCheck(summary: WorkPatternSummary, region: string, modelId: string): Promise<string> {
+  const client = new BedrockRuntimeClient({ region });
   const prompt = buildPrompt(summary);
   
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01'
-    },
-    body: JSON.stringify({
-      model: 'claude-3-5-haiku-20241022',
-      max_tokens: 200,
-      messages: [{
-        role: 'user',
-        content: prompt
-      }]
-    })
+  const payload = {
+    anthropic_version: 'bedrock-2023-05-31',
+    max_tokens: 200,
+    messages: [{
+      role: 'user',
+      content: prompt
+    }]
+  };
+  
+  const command = new InvokeModelCommand({
+    modelId,
+    contentType: 'application/json',
+    accept: 'application/json',
+    body: JSON.stringify(payload)
   });
   
-  if (!response.ok) {
-    throw new Error(`Claude API error: ${response.status} ${response.statusText}`);
+  try {
+    const response = await client.send(command);
+    const responseBody = JSON.parse(new TextDecoder().decode(response.body));
+    
+    if (responseBody.content && responseBody.content.length > 0) {
+      return responseBody.content[0].text;
+    }
+    
+    throw new Error('No content in Bedrock response');
+  } catch (error) {
+    throw new Error(`Error calling Bedrock API: ${error.message}`);
   }
-  
-  const data = await response.json();
-  return data.content[0].text;
 }
 
 function buildPrompt(summary: WorkPatternSummary): string {
+  // Convert distribution to natural language
+  let distributionDesc = '';
+  switch (summary.commitDistribution) {
+    case 'focused':
+      distributionDesc = 'focused on a single repository';
+      break;
+    case 'clustered':
+      distributionDesc = 'concentrated in a few repositories';
+      break;
+    case 'spread':
+      distributionDesc = 'spread evenly across repositories';
+      break;
+    case 'sparse':
+      distributionDesc = 'sparse with minimal activity';
+      break;
+  }
+  
   return `You're reviewing a developer's week of coding activity. Here's what happened:
 
 - Total repositories: ${summary.totalRepos}
 - Active repos (with commits): ${summary.activeRepos}
 - Cold repos (no commits): ${summary.coldRepos}
 - Total commits: ${summary.totalCommits}
-- Commit pattern: ${summary.commitDistribution}
+- Commit pattern: ${distributionDesc}
 - Top languages: ${summary.topLanguages.map(l => l.language).join(', ')}
 - Most active repos: ${summary.mostActiveRepos.join(', ')}
 
@@ -699,7 +733,7 @@ async function execGit(repoPath: string, command: string): Promise<string>
 ### Function 3: loadConfig()
 
 ```typescript
-function loadConfig(): Config
+function loadConfig(requireAwsConfig?: boolean): Config
 ```
 
 **Preconditions:**
@@ -708,8 +742,10 @@ function loadConfig(): Config
 **Postconditions:**
 - Returns valid Config object
 - `rootPath` defaults to ~/code if not set
-- `claudeApiKey` read from ANTHROPIC_API_KEY env var
-- Throws error if API key not found
+- `awsRegion` defaults to us-east-1 if not set
+- `modelId` defaults to us.anthropic.claude-3-5-haiku-20241022-v1:0 if not set
+- Checks AWS credentials via SDK credential chain if requireAwsConfig is true
+- Throws error if AWS credentials not found and requireAwsConfig is true
 
 **Loop Invariants:** N/A
 
@@ -718,7 +754,7 @@ function loadConfig(): Config
 ```typescript
 // Example 1: Basic usage with defaults
 // Command: vibe
-// Scans ~/code, analyzes last 7 days, outputs to stdout
+// Scans ~/code, analyzes last 7 days, calls Bedrock, outputs AI summary to stdout
 
 // Example 2: Custom time range
 // Command: vibe --days 14
@@ -728,14 +764,29 @@ function loadConfig(): Config
 // Command: vibe --root ~/projects
 // Scans ~/projects instead of ~/code
 
-// Example 4: Combined options
+// Example 4: Raw output mode
+// Command: vibe --raw
+// Scans ~/code, outputs metrics in key=value format without calling Bedrock
+
+// Example 5: Combined options
 // Command: vibe --days 30 --root ~/work
 // Scans ~/work, analyzes last 30 days
 
-// Example output:
-// "Looks like you've been deep in TypeScript land this week with 23 commits 
-// across 3 projects. Most of the action happened in vibe-cli and api-server, 
-// while a few other repos stayed quiet. Pretty focused week overall!"
+// Example AI output:
+// "This week looks like a laser-focused sprint in TypeScript land, with all energy 
+// channeled into the vibe project. Just one commit tells a story of careful, deliberate 
+// work—maybe fine-tuning something important or laying groundwork for a bigger feature."
+
+// Example raw output:
+// time_range_start=2026-02-14T12:00:00.000Z
+// time_range_end=2026-02-21T12:00:00.000Z
+// total_repos=1
+// active_repos=1
+// cold_repos=0
+// total_commits=1
+// commit_distribution=focused
+// top_language_1=TypeScript:100%
+// most_active_repo_1=vibe
 ```
 
 
@@ -799,9 +850,9 @@ function loadConfig(): Config
 
 ### Property 10: Distribution Classification Validity
 
-*For any* list of repository metrics, the commit distribution pattern should be classified as exactly one of: clustered, spread, or sparse.
+*For any* list of repository metrics, the commit distribution pattern should be classified as exactly one of: focused, clustered, spread, or sparse.
 
-**Validates: Requirements 6.4, 6.8, 6.9**
+**Validates: Requirements 6.4, 6.5, 6.6, 6.7, 6.8**
 
 ### Property 11: Top Languages Limit
 
@@ -1009,12 +1060,13 @@ Test scenarios:
 
 ## Security Considerations
 
-### API Key Security
+### AWS Credentials Security
 
-- Read API key from environment variable only (never hardcode)
-- Never log or display API key in output
-- Recommend using .env files or shell configuration for key management
-- Document secure key storage practices in README
+- Use AWS SDK credential chain (environment variables, profiles, IAM roles)
+- Never hardcode AWS credentials
+- Never log or display AWS credentials in output or error messages
+- Recommend using AWS profiles or IAM roles for key management
+- Document secure credential configuration in AWS_BEDROCK_SETUP.md
 
 ### Command Injection Prevention
 
@@ -1031,10 +1083,10 @@ Test scenarios:
 
 ### Network Security
 
-- Use HTTPS for all API calls
-- Validate API responses before processing
+- Use AWS SDK for secure communication with Bedrock
+- Validate Bedrock API responses before processing
 - Handle network errors without exposing sensitive information
-- Consider rate limiting to prevent abuse
+- AWS SDK handles TLS/SSL automatically
 
 ## Dependencies
 

@@ -42,7 +42,7 @@ describe('DataAggregator', () => {
     expect(summary.activeRepos).toBe(1);
     expect(summary.coldRepos).toBe(0);
     expect(summary.totalCommits).toBe(10);
-    expect(summary.commitDistribution).toBe('clustered');
+    expect(summary.commitDistribution).toBe('focused');
     expect(summary.mostActiveRepos).toEqual(['repo1']);
   });
 
@@ -174,7 +174,7 @@ describe('DataAggregator', () => {
     expect(summary.commitDistribution).toBe('sparse');
   });
 
-  it('should classify distribution as clustered for single active repo', () => {
+  it('should classify distribution as focused for single active repo', () => {
     const metrics: RepoMetrics[] = [
       {
         repoPath: '/path/to/repo1',
@@ -196,7 +196,7 @@ describe('DataAggregator', () => {
 
     const summary = aggregator.aggregate(metrics);
 
-    expect(summary.commitDistribution).toBe('clustered');
+    expect(summary.commitDistribution).toBe('focused');
   });
 
   it('should calculate time range correctly', () => {

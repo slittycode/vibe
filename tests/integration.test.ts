@@ -107,18 +107,17 @@ describe('Integration: End-to-End Workflow', () => {
     await createTestRepo('active-repo-2', 3);
     await createTestRepo('cold-repo', 0);
 
-    // Run vibe CLI
+    // Run vibe CLI with --raw flag to get structured output
     const { stdout, stderr } = await execFileAsync(
       'node',
-      ['dist/index.js', '--root', testRoot, '--days', '7']
+      ['dist/index.js', '--root', testRoot, '--days', '7', '--raw']
     );
 
-    // Verify output contains expected patterns
-    expect(stdout).toContain('Vibe Check Summary');
-    expect(stdout).toContain('Total Repositories: 3');
-    expect(stdout).toContain('Active Repositories: 2');
-    expect(stdout).toContain('Cold Repositories: 1');
-    expect(stdout).toContain('Total Commits: 8');
+    // Verify output contains expected metrics in raw format
+    expect(stdout).toContain('total_repos=3');
+    expect(stdout).toContain('active_repos=2');
+    expect(stdout).toContain('cold_repos=1');
+    expect(stdout).toContain('total_commits=8');
     
     // Warnings for repos with no commits are expected in stderr
     expect(stderr).toContain('Warning: Git command failed');
@@ -146,16 +145,15 @@ describe('Integration: End-to-End Workflow', () => {
       Python: 2,
     });
 
-    // Run vibe CLI
+    // Run vibe CLI with --raw flag
     const { stdout } = await execFileAsync(
       'node',
-      ['dist/index.js', '--root', testRoot, '--days', '7']
+      ['dist/index.js', '--root', testRoot, '--days', '7', '--raw']
     );
 
-    // Verify language detection
-    expect(stdout).toContain('Top Languages:');
-    expect(stdout).toContain('TypeScript');
-    expect(stdout).toContain('Python');
+    // Verify language detection in raw output
+    expect(stdout).toMatch(/top_language_\d+=TypeScript/);
+    expect(stdout).toMatch(/top_language_\d+=Python/);
   }, 30000);
 
   it('should identify most active repositories', async () => {
@@ -164,32 +162,31 @@ describe('Integration: End-to-End Workflow', () => {
     await createTestRepo('moderately-active', 5);
     await createTestRepo('slightly-active', 2);
 
-    // Run vibe CLI
+    // Run vibe CLI with --raw flag
     const { stdout } = await execFileAsync(
       'node',
-      ['dist/index.js', '--root', testRoot, '--days', '7']
+      ['dist/index.js', '--root', testRoot, '--days', '7', '--raw']
     );
 
-    // Verify most active repos are listed
-    expect(stdout).toContain('Most Active Repositories:');
-    expect(stdout).toContain('very-active');
-    expect(stdout).toContain('moderately-active');
-    expect(stdout).toContain('slightly-active');
+    // Verify most active repos are listed in raw output
+    expect(stdout).toContain('most_active_repo_1=very-active');
+    expect(stdout).toContain('most_active_repo_2=moderately-active');
+    expect(stdout).toContain('most_active_repo_3=slightly-active');
   }, 30000);
 
   it('should respect custom days parameter', async () => {
     // Create repo with recent commit
     await createTestRepo('recent-repo', 1);
 
-    // Run vibe CLI with 1 day
+    // Run vibe CLI with 1 day and --raw flag
     const { stdout: stdout1 } = await execFileAsync(
       'node',
-      ['dist/index.js', '--root', testRoot, '--days', '1']
+      ['dist/index.js', '--root', testRoot, '--days', '1', '--raw']
     );
 
     // The commit should be counted (it was just created)
-    expect(stdout1).toContain('Active Repositories: 1');
-    expect(stdout1).toContain('Total Commits: 1');
+    expect(stdout1).toContain('active_repos=1');
+    expect(stdout1).toContain('total_commits=1');
   }, 30000);
 
   it('should handle nested directory structures', async () => {
@@ -207,29 +204,29 @@ describe('Integration: End-to-End Workflow', () => {
     await execFileAsync('git', ['add', '.'], { cwd: repoPath });
     await execFileAsync('git', ['commit', '-m', 'Initial commit'], { cwd: repoPath });
 
-    // Run vibe CLI
+    // Run vibe CLI with --raw flag
     const { stdout } = await execFileAsync(
       'node',
-      ['dist/index.js', '--root', testRoot, '--days', '7']
+      ['dist/index.js', '--root', testRoot, '--days', '7', '--raw']
     );
 
     // Verify nested repo was found
-    expect(stdout).toContain('Total Repositories: 1');
-    expect(stdout).toContain('Active Repositories: 1');
+    expect(stdout).toContain('total_repos=1');
+    expect(stdout).toContain('active_repos=1');
   }, 30000);
 
   it('should exit with code 0 on success', async () => {
     // Create test repo
     await createTestRepo('success-repo', 1);
 
-    // Run vibe CLI and check exit code
+    // Run vibe CLI with --raw flag and check exit code
     const result = await execFileAsync(
       'node',
-      ['dist/index.js', '--root', testRoot, '--days', '7']
+      ['dist/index.js', '--root', testRoot, '--days', '7', '--raw']
     );
 
     // execFileAsync only resolves if exit code is 0
-    expect(result.stdout).toContain('Vibe Check Summary');
+    expect(result.stdout).toContain('total_repos=1');
   }, 30000);
 
   it('should classify commit distribution patterns', async () => {
@@ -238,13 +235,13 @@ describe('Integration: End-to-End Workflow', () => {
     await createTestRepo('quiet-1', 1);
     await createTestRepo('quiet-2', 1);
 
-    // Run vibe CLI
+    // Run vibe CLI with --raw flag
     const { stdout } = await execFileAsync(
       'node',
-      ['dist/index.js', '--root', testRoot, '--days', '7']
+      ['dist/index.js', '--root', testRoot, '--days', '7', '--raw']
     );
 
     // Verify distribution is classified
-    expect(stdout).toMatch(/Commit Distribution: (focused|clustered|spread|sparse)/);
+    expect(stdout).toMatch(/commit_distribution=(focused|clustered|spread|sparse)/);
   }, 30000);
 });

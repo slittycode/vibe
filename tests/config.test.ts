@@ -47,24 +47,30 @@ describe('Config Module', () => {
   });
 
   describe('loadConfig', () => {
-    it('should throw error when ANTHROPIC_API_KEY is not set', () => {
-      delete process.env.ANTHROPIC_API_KEY;
+    it('should throw error when AWS credentials are not configured', () => {
+      delete process.env.AWS_ACCESS_KEY_ID;
+      delete process.env.AWS_SECRET_ACCESS_KEY;
+      delete process.env.AWS_PROFILE;
       
       expect(() => loadConfig()).toThrow(
-        'ANTHROPIC_API_KEY environment variable not set. Please set it to use vibe.'
+        'AWS credentials not configured'
       );
     });
 
-    it('should load config with API key from environment', () => {
-      process.env.ANTHROPIC_API_KEY = 'test-api-key';
+    it('should load config with AWS credentials from environment', () => {
+      process.env.AWS_ACCESS_KEY_ID = 'test-key-id';
+      process.env.AWS_SECRET_ACCESS_KEY = 'test-secret';
+      process.env.VIBE_ROOT = homedir(); // Use home directory which always exists
       
       const config = loadConfig();
       
-      expect(config.claudeApiKey).toBe('test-api-key');
+      expect(config.awsRegion).toBe('us-east-1');
+      expect(config.modelId).toBe('us.anthropic.claude-3-5-haiku-20241022-v1:0');
     });
 
     it('should use default root path ~/code when VIBE_ROOT not set', () => {
-      process.env.ANTHROPIC_API_KEY = 'test-api-key';
+      process.env.AWS_ACCESS_KEY_ID = 'test-key-id';
+      process.env.AWS_SECRET_ACCESS_KEY = 'test-secret';
       delete process.env.VIBE_ROOT;
       
       const config = loadConfig();
@@ -73,7 +79,8 @@ describe('Config Module', () => {
     });
 
     it('should use VIBE_ROOT when set', () => {
-      process.env.ANTHROPIC_API_KEY = 'test-api-key';
+      process.env.AWS_ACCESS_KEY_ID = 'test-key-id';
+      process.env.AWS_SECRET_ACCESS_KEY = 'test-secret';
       process.env.VIBE_ROOT = '~/projects';
       
       const config = loadConfig();
@@ -82,16 +89,18 @@ describe('Config Module', () => {
     });
 
     it('should expand tilde in VIBE_ROOT', () => {
-      process.env.ANTHROPIC_API_KEY = 'test-api-key';
-      process.env.VIBE_ROOT = '~/custom/path';
+      process.env.AWS_ACCESS_KEY_ID = 'test-key-id';
+      process.env.AWS_SECRET_ACCESS_KEY = 'test-secret';
+      process.env.VIBE_ROOT = '~'; // Use home directory which always exists
       
       const config = loadConfig();
       
-      expect(config.rootPath).toBe(`${homedir()}/custom/path`);
+      expect(config.rootPath).toBe(homedir());
     });
 
     it('should set default days to 7', () => {
-      process.env.ANTHROPIC_API_KEY = 'test-api-key';
+      process.env.AWS_ACCESS_KEY_ID = 'test-key-id';
+      process.env.AWS_SECRET_ACCESS_KEY = 'test-secret';
       
       const config = loadConfig();
       
@@ -99,7 +108,8 @@ describe('Config Module', () => {
     });
 
     it('should set maxDepth to 10', () => {
-      process.env.ANTHROPIC_API_KEY = 'test-api-key';
+      process.env.AWS_ACCESS_KEY_ID = 'test-key-id';
+      process.env.AWS_SECRET_ACCESS_KEY = 'test-secret';
       
       const config = loadConfig();
       
@@ -107,14 +117,18 @@ describe('Config Module', () => {
     });
 
     it('should return complete Config object', () => {
-      process.env.ANTHROPIC_API_KEY = 'test-api-key';
-      process.env.VIBE_ROOT = '/custom/root';
+      process.env.AWS_ACCESS_KEY_ID = 'test-key-id';
+      process.env.AWS_SECRET_ACCESS_KEY = 'test-secret';
+      process.env.VIBE_ROOT = '~'; // Use home directory which always exists
+      process.env.AWS_REGION = 'us-west-2';
+      process.env.BEDROCK_MODEL_ID = 'custom-model-id';
       
       const config = loadConfig();
       
       expect(config).toEqual({
-        rootPath: '/custom/root',
-        claudeApiKey: 'test-api-key',
+        rootPath: homedir(),
+        awsRegion: 'us-west-2',
+        modelId: 'custom-model-id',
         defaultDays: 7,
         maxDepth: 10,
       });

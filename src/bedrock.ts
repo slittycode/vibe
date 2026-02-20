@@ -53,11 +53,17 @@ export class BedrockClient {
       const response = await this.client.send(command);
       const responseBody = JSON.parse(new TextDecoder().decode(response.body));
 
-      if (responseBody.content && responseBody.content.length > 0) {
-        return responseBody.content[0].text;
+      // Validate response structure before processing (Requirement 11.6)
+      if (!responseBody.content || !Array.isArray(responseBody.content) || responseBody.content.length === 0) {
+        throw new Error('No content in Bedrock response');
       }
 
-      throw new Error('No content in Bedrock response');
+      const textContent = responseBody.content[0].text;
+      if (typeof textContent !== 'string' || textContent.length === 0) {
+        throw new Error('Invalid or empty text in Bedrock response');
+      }
+
+      return textContent;
     } catch (error) {
       if (error instanceof Error) {
         throw new Error(`Error calling Bedrock API: ${error.message}`);
