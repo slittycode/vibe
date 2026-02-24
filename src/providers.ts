@@ -21,6 +21,22 @@ export interface SummaryProvider {
  * Provider types for configuration
  */
 export type ProviderType = 'bedrock' | 'template' | 'ollama' | 'auto';
+export type ConcreteProviderType = Exclude<ProviderType, 'auto'>;
+export type FallbackOrder = 'cloud-first' | 'local-first';
+
+/**
+ * Shared options for provider creation.
+ */
+export interface ProviderCreateOptions {
+  region?: string;
+  modelId?: string;
+  baseUrl?: string;
+  model?: string;
+  timeout?: number;
+  fallbackOrder?: FallbackOrder;
+  debugProvider?: boolean;
+  providerLogger?: (line: string) => void;
+}
 
 /**
  * Factory for creating summary providers
@@ -32,28 +48,38 @@ export class ProviderFactory {
    * @param config - Provider-specific configuration
    * @returns Configured summary provider
    */
-  static async create(type: ProviderType, config?: any): Promise<SummaryProvider> {
+  static async create(type: ProviderType, config?: ProviderCreateOptions): Promise<SummaryProvider> {
     switch (type) {
       case 'bedrock':
-        const { BedrockClient } = await import('./bedrock.js');
         return new BedrockAdapter(config?.region, config?.modelId);
 
       case 'template':
-        const { TemplateProvider } = await import('./template.js');
         return new TemplateAdapter();
 
       case 'ollama':
         const { OllamaProvider } = await import('./ollama.js');
-        return new OllamaProvider(config);
+        return new OllamaProvider({
+          baseUrl: config?.baseUrl,
+          model: config?.model,
+          timeout: config?.timeout
+        });
 
       case 'auto':
-        const { FallbackProvider } = await import('./fallback.js');
+        const { FallbackProvider, getFallbackChain } = await import('./fallback.js');
+        const fallbackOrder: FallbackOrder = config?.fallbackOrder === 'local-first' ? 'local-first' : 'cloud-first';
+
         return new FallbackProvider({
-          providers: ['ollama', 'bedrock', 'template'],
+          providers: getFallbackChain(fallbackOrder),
           configs: {
             bedrock: { region: config?.region, modelId: config?.modelId },
-            ollama: config
-          }
+            ollama: {
+              baseUrl: config?.baseUrl,
+              model: config?.model,
+              timeout: config?.timeout
+            }
+          },
+          debug: config?.debugProvider ?? false,
+          logger: config?.providerLogger
         });
 
       default:
@@ -67,8 +93,13 @@ export class ProviderFactory {
  */
 class BedrockAdapter implements SummaryProvider {
   private bedrockClient: any;
+  private region?: string;
+  private modelId?: string;
 
   constructor(region?: string, modelId?: string) {
+    this.region = region;
+    this.modelId = modelId;
+
     // Import dynamically to avoid circular dependencies
     import('./bedrock.js').then(({ BedrockClient }) => {
       this.bedrockClient = new BedrockClient(region, modelId);
@@ -78,7 +109,7 @@ class BedrockAdapter implements SummaryProvider {
   async generateVibeCheck(summary: WorkPatternSummary): Promise<string> {
     if (!this.bedrockClient) {
       const { BedrockClient } = await import('./bedrock.js');
-      this.bedrockClient = new BedrockClient();
+      this.bedrockClient = new BedrockClient(this.region, this.modelId);
     }
     return this.bedrockClient.generateVibeCheck(summary);
   }

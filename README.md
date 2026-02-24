@@ -10,7 +10,7 @@ npm install -g vibe-cli
 
 ## Configuration
 
-Set up AWS credentials (required for AI summaries):
+Set up AWS credentials for Bedrock mode:
 
 ```bash
 # Option 1: Environment variables
@@ -28,7 +28,8 @@ Optionally, set a custom root directory (defaults to `~/code`):
 export VIBE_ROOT="~/projects"
 ```
 
-See `AWS_BEDROCK_SETUP.md` for detailed setup instructions.
+If you only use `template` mode, AWS credentials are not required.
+See `AWS_BEDROCK_SETUP.md` for detailed Bedrock setup instructions.
 
 ## Usage
 
@@ -45,11 +46,20 @@ vibe --root ~/projects
 # Use template provider (no API keys needed)
 vibe --provider template --days 7
 
+# Use Bedrock explicitly
+vibe --provider bedrock --days 7
+
 # Use local LLM via Ollama
 vibe --provider ollama --days 7
 
-# Auto provider (tries Ollama → Bedrock → Template)
+# Auto provider (default order: Bedrock → Ollama → Template)
 vibe --provider auto --days 7
+
+# Auto provider, local-first order (Ollama → Bedrock → Template)
+vibe --provider auto --fallback-order local-first --days 7
+
+# Debug provider routing / fallback reasons
+vibe --provider auto --debug-provider --days 7
 
 # Raw output (no AI processing)
 vibe --raw --days 7
@@ -84,15 +94,37 @@ vibe --days 30 --root ~/work --provider template
 
 ### Auto (Intelligent Fallback)
 
-- Tries Ollama → Bedrock → Template automatically
-- Uses best available provider
-- Seamless fallback handling
+- Deterministic fallback chain with configurable order:
+  - `--fallback-order cloud-first` (default): Bedrock → Ollama → Template
+  - `--fallback-order local-first`: Ollama → Bedrock → Template
+- Explicit fallback reason logging with `--debug-provider`
+- Bedrock remains the preferred cloud path in `cloud-first` mode
+
+## Failure Behavior and Debugging
+
+Use `--debug-provider` to see why a provider was skipped or why fallback happened:
+
+```bash
+vibe --provider auto --fallback-order cloud-first --debug-provider
+```
+
+Example debug output (stderr):
+
+```text
+[debug-provider] selected_provider=auto
+[debug-provider] auto_chain=bedrock -> ollama -> template
+[debug-provider] [provider-fallback] provider=bedrock decision=skipped-unavailable reason=bedrock is unavailable: missing AWS credentials or AWS_PROFILE
+[debug-provider] [provider-fallback] provider=ollama decision=fallback reason=Ollama API error: Cannot connect to Ollama. Is Ollama running? Start with: ollama serve
+[debug-provider] [provider-fallback] provider=template decision=success reason=provider returned grounded summary
+```
+
+Grounding guardrails are applied so summaries avoid hallucinated commit hashes/file paths and stay tied to detected git facts.
 
 ## Requirements
 
 - Node.js 22.0.0 or higher
 - Git installed and available in PATH
-- AWS credentials (for Bedrock provider) OR Ollama (for local LLM) OR use template/auto providers for API-free operation
+- AWS credentials (for Bedrock provider), or Ollama (for local LLM), or template/auto providers for API-free operation
 
 ## Development
 

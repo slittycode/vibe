@@ -8,16 +8,25 @@ import { parseCLIArgs } from './cli.js';
 import { RepositoryScanner } from './scanner.js';
 import { GitAnalyzer } from './analyzer.js';
 import { DataAggregator } from './aggregator.js';
-import { ProviderFactory, SummaryProvider } from './providers.js';
-import { FallbackProvider } from './fallback.js';
+import { ProviderFactory } from './providers.js';
+import { FallbackProvider, getFallbackChain } from './fallback.js';
 
 /**
  * Shows provider availability status
  */
-async function showProviderStatus(): Promise<void> {
+async function showProviderStatus(fallbackOrder: 'cloud-first' | 'local-first', debugProvider: boolean): Promise<void> {
+  const chain = getFallbackChain(fallbackOrder);
+  const logger = debugProvider
+    ? (line: string) => {
+      console.error(`[debug-provider] ${line}`);
+    }
+    : undefined;
+
   const fallbackProvider = new FallbackProvider({
-    providers: ['ollama', 'bedrock', 'template'],
-    skipUnavailable: true
+    providers: chain,
+    skipUnavailable: true,
+    debug: debugProvider,
+    logger
   });
 
   const status = await fallbackProvider.getProviderInfo();
@@ -30,8 +39,11 @@ async function showProviderStatus(): Promise<void> {
     console.log(`${icon} ${type.padEnd(10)} - ${statusText}`);
   });
   console.log('');
+  console.log(`Auto fallback order (${fallbackOrder}): ${chain.join(' -> ')}`);
+  console.log('');
   console.log('Usage: vibe --provider <provider> --days <days>');
   console.log('Providers: bedrock, template, ollama, auto');
+  console.log('Debug routing: add --debug-provider');
 }
 
 /**
@@ -45,7 +57,7 @@ export async function main(args: string[]): Promise<void> {
 
     // Step 2: Handle status display
     if (options.status) {
-      await showProviderStatus();
+      await showProviderStatus(options.fallbackOrder || 'cloud-first', options.debugProvider || false);
       process.exit(0);
     }
 
@@ -97,11 +109,42 @@ export async function main(args: string[]): Promise<void> {
       }
     } else {
       // AI summary mode - use configured provider
+      const providerLogger = options.debugProvider
+        ? (line: string) => {
+          console.error(`[debug-provider] ${line}`);
+        }
+        : undefined;
+
+      if (options.debugProvider) {
+        console.error(`[debug-provider] selected_provider=${options.provider}`);
+        if (options.provider === 'auto') {
+          const chain = getFallbackChain(options.fallbackOrder || 'cloud-first');
+          console.error(`[debug-provider] auto_chain=${chain.join(' -> ')}`);
+        }
+      }
+
       const provider = await ProviderFactory.create(options.provider!, {
         region: config.awsRegion,
-        modelId: config.modelId
+        modelId: config.modelId,
+        fallbackOrder: options.fallbackOrder,
+        debugProvider: options.debugProvider,
+        providerLogger
       });
-      const vibeText = await provider.generateVibeCheck(summary);
+
+      let vibeText: string;
+      try {
+        vibeText = await provider.generateVibeCheck(summary);
+        if (options.debugProvider && options.provider !== 'auto') {
+          console.error(`[debug-provider] provider=${options.provider} decision=success reason=summary generated`);
+        }
+      } catch (error) {
+        if (options.debugProvider && options.provider !== 'auto') {
+          const reason = error instanceof Error ? error.message : String(error);
+          console.error(`[debug-provider] provider=${options.provider} decision=failure reason=${reason}`);
+        }
+        throw error;
+      }
+
       console.log(vibeText);
     }
 

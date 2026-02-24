@@ -5,6 +5,7 @@
 
 import { BedrockRuntimeClient, InvokeModelCommand } from '@aws-sdk/client-bedrock-runtime';
 import { WorkPatternSummary } from './aggregator.js';
+import { buildGroundedPrompt, validateSummaryGrounding } from './grounding.js';
 
 /**
  * BedrockClient generates casual summaries using Claude via AWS Bedrock
@@ -63,7 +64,14 @@ export class BedrockClient {
         throw new Error('Invalid or empty text in Bedrock response');
       }
 
-      return textContent;
+      const groundingResult = validateSummaryGrounding(textContent, summary, {
+        requireGroundedFact: false
+      });
+      if (!groundingResult.valid) {
+        throw new Error(`Ungrounded Bedrock summary: ${groundingResult.reasons.join('; ')}`);
+      }
+
+      return textContent.trim();
     } catch (error) {
       if (error instanceof Error) {
         throw new Error(`Error calling Bedrock API: ${error.message}`);
@@ -78,33 +86,6 @@ export class BedrockClient {
    * @returns Formatted prompt string
    */
   private buildPrompt(summary: WorkPatternSummary): string {
-    // Describe the distribution pattern in natural language
-    let distributionDesc = '';
-    switch (summary.commitDistribution) {
-      case 'focused':
-        distributionDesc = 'focused on a single repository';
-        break;
-      case 'clustered':
-        distributionDesc = 'concentrated in a few repositories';
-        break;
-      case 'spread':
-        distributionDesc = 'spread evenly across repositories';
-        break;
-      case 'sparse':
-        distributionDesc = 'sparse with minimal activity';
-        break;
-    }
-
-    return `You're reviewing a developer's week of coding activity. Here's what happened:
-
-- Total repositories: ${summary.totalRepos}
-- Active repos (with commits): ${summary.activeRepos}
-- Cold repos (no commits): ${summary.coldRepos}
-- Total commits: ${summary.totalCommits}
-- Commit pattern: ${distributionDesc}
-- Top languages: ${summary.topLanguages.map(l => l.language).join(', ')}
-- Most active repos: ${summary.mostActiveRepos.join(', ')}
-
-Write a casual, friendly 3-4 sentence summary of how this week of work is looking. Make it feel like a journal entry, not a report. Be conversational and observant about the patterns you see.`;
+    return buildGroundedPrompt(summary);
   }
 }

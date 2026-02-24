@@ -4,6 +4,7 @@
  */
 
 import { WorkPatternSummary } from './aggregator.js';
+import { buildGroundedPrompt, validateSummaryGrounding } from './grounding.js';
 
 /**
  * Ollama configuration interface
@@ -70,7 +71,15 @@ export class OllamaProvider {
         }
       });
 
-      return response.response.trim();
+      const text = (response.response || '').trim();
+      const groundingResult = validateSummaryGrounding(text, summary, {
+        requireGroundedFact: false
+      });
+      if (!groundingResult.valid) {
+        throw new Error(`Ungrounded Ollama summary: ${groundingResult.reasons.join('; ')}`);
+      }
+
+      return text;
     } catch (error) {
       if (error instanceof Error) {
         throw new Error(`Ollama API error: ${error.message}`);
@@ -165,34 +174,7 @@ export class OllamaProvider {
    * Builds the prompt for the LLM based on work pattern summary
    */
   private buildPrompt(summary: WorkPatternSummary): string {
-    // Describe the distribution pattern in natural language
-    let distributionDesc = '';
-    switch (summary.commitDistribution) {
-      case 'focused':
-        distributionDesc = 'focused on a single repository';
-        break;
-      case 'clustered':
-        distributionDesc = 'concentrated in a few repositories';
-        break;
-      case 'spread':
-        distributionDesc = 'spread evenly across repositories';
-        break;
-      case 'sparse':
-        distributionDesc = 'sparse with minimal activity';
-        break;
-    }
-
-    return `You're reviewing a developer's week of coding activity. Here's what happened:
-
-- Total repositories: ${summary.totalRepos}
-- Active repos (with commits): ${summary.activeRepos}
-- Cold repos (no commits): ${summary.coldRepos}
-- Total commits: ${summary.totalCommits}
-- Commit pattern: ${distributionDesc}
-- Top languages: ${summary.topLanguages.map(l => l.language).join(', ')}
-- Most active repos: ${summary.mostActiveRepos.join(', ')}
-
-Write a casual, friendly 3-4 sentence summary of how this week of work is looking. Make it feel like a journal entry, not a report. Be conversational and observant about the patterns you see.`;
+    return buildGroundedPrompt(summary);
   }
 
   /**

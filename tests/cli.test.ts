@@ -78,4 +78,29 @@ describe('CLI Argument Parsing', () => {
     expect(consoleErrorSpy).toHaveBeenCalledWith('Error: --days must be a positive integer');
     expect(exitSpy).toHaveBeenCalledWith(1);
   });
+
+  it('should parse --fallback-order with default cloud-first', () => {
+    const options = parseCLIArgs(['node', 'vibe']);
+
+    expect(options.fallbackOrder).toBe('cloud-first');
+  });
+
+  it('should parse --fallback-order local-first', () => {
+    const options = parseCLIArgs(['node', 'vibe', '--fallback-order', 'local-first']);
+
+    expect(options.fallbackOrder).toBe('local-first');
+  });
+
+  it('should exit with error for invalid fallback order', () => {
+    parseCLIArgs(['node', 'vibe', '--fallback-order', 'random-order']);
+
+    expect(consoleErrorSpy).toHaveBeenCalledWith('Error: --fallback-order must be one of: cloud-first, local-first');
+    expect(exitSpy).toHaveBeenCalledWith(1);
+  });
+
+  it('should parse --debug-provider flag', () => {
+    const options = parseCLIArgs(['node', 'vibe', '--debug-provider']);
+
+    expect(options.debugProvider).toBe(true);
+  });
 });
